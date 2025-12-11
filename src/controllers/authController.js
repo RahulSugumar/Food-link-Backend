@@ -39,7 +39,7 @@ exports.register = async (req, res) => {
 
 // Login user
 exports.login = async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, role } = req.body;
 
     try {
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -49,7 +49,25 @@ exports.login = async (req, res) => {
 
         if (error) throw error;
 
-        res.status(200).json({ message: 'Login successful', session: data.session });
+        // Verify role
+        const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', data.user.id)
+            .single();
+
+        if (profileError) {
+            // If profile not found, something is wrong, but we can't verify role logic
+            throw new Error('User profile not found.');
+        }
+
+        if (profile.role !== role) {
+            // Log out immediately if role mismatch
+            await supabase.auth.signOut();
+            return res.status(403).json({ error: `Access denied. Registered as ${profile.role}, cannot login as ${role}.` });
+        }
+
+        res.status(200).json({ message: 'Login successful', session: data.session, user: { ...data.user, role: profile.role } });
     } catch (error) {
         res.status(401).json({ error: error.message });
     }

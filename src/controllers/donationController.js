@@ -47,7 +47,7 @@ exports.createDonation = async (req, res) => {
                         receiver.location.lat, receiver.location.lng
                     );
 
-                    console.log(`Checking receiver ${receiver.id}: Distance = ${distance}km`);
+                    console.log(`[Notification Debug] Receiver: ${receiver.name} (${receiver.id}) | Distance: ${distance.toFixed(3)} km | Limit: ${NOTIFICATION_RADIUS_KM} km`);
 
                     if (distance <= NOTIFICATION_RADIUS_KM) {
                         notifications.push({
@@ -58,7 +58,7 @@ exports.createDonation = async (req, res) => {
                         });
                     }
                 } else {
-                    console.log(`Skipping receiver ${receiver.id}: Invalid location data`, receiver.location);
+                    console.log(`[Notification Debug] Skipping receiver ${receiver.id}: Missing location data.`);
                 }
             });
 
@@ -113,6 +113,42 @@ exports.getDonationById = async (req, res) => {
     }
 };
 
+// Get donations by specific donor
+exports.getDonationsByDonor = async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        const { data, error } = await supabase
+            .from('donations')
+            .select('*')
+            .eq('donor_id', id)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        res.status(200).json(data);
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
+
+// Get recent donations (Community Feed)
+exports.getRecentDonations = async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('donations')
+            .select('*, profiles:donor_id(name)')
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+        if (error) throw error;
+
+        res.status(200).json(data);
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
+
 // Update donation status (e.g., when reserved or completed)
 exports.updateStatus = async (req, res) => {
     const { id } = req.params;
@@ -128,6 +164,26 @@ exports.updateStatus = async (req, res) => {
         if (error) throw error;
 
         res.status(200).json({ message: 'Donation status updated', data });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
+
+// Delete donation (and return details for final view)
+exports.deleteDonation = async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        const { data, error } = await supabase
+            .from('donations')
+            .delete()
+            .eq('id', id)
+            .select('*, profiles:donor_id(name, phone)') // Return info one last time
+            .single();
+
+        if (error) throw error;
+
+        res.status(200).json({ message: 'Donation claimed and removed', data });
     } catch (error) {
         res.status(400).json({ error: error.message });
     }
