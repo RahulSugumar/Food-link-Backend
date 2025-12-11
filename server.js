@@ -17,6 +17,7 @@ app.use('/api/donations', require('./src/routes/donationRoutes'));
 app.use('/api/requests', require('./src/routes/requestRoutes'));
 app.use('/api/fridges', require('./src/routes/fridgeRoutes'));
 app.use('/api/volunteers', require('./src/routes/volunteerRoutes'));
+app.use('/api/notifications', require('./src/routes/notificationRoutes'));
 
 // Basic Route
 app.get('/', (req, res) => {

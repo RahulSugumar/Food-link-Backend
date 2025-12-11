@@ -11,7 +11,52 @@ exports.register = async (req, res) => {
             password,
         });
 
-        if (authError) throw authError;
+        if (authError) {
+            // Handle "User already registered" case
+            if (authError.message.includes('already registered') || authError.status === 400) {
+                // Try to sign in to verify it's the same user trying to "recover" or "re-register"
+                const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
+                    email,
+                    password,
+                });
+
+                if (loginError) {
+                    // Valid existing user, but wrong password provided during this "registration" attempt
+                    throw new Error('User already exists. Please login.');
+                }
+
+                // If login successful, we have the User ID. Check if profile exists.
+                if (loginData.user) {
+                    const { data: existingProfile, error: existingProfileError } = await supabase
+                        .from('profiles')
+                        .select('*')
+                        .eq('id', loginData.user.id)
+                        .single();
+
+                    if (!existingProfile) {
+                        // ORPHANED ACCOUNT DETECTED! Re-create the profile.
+                        const { error: profileError } = await supabase
+                            .from('profiles')
+                            .insert([
+                                {
+                                    id: loginData.user.id,
+                                    email,
+                                    role,
+                                    name,
+                                    phone,
+                                    location,
+                                },
+                            ]);
+                        if (profileError) throw profileError;
+                        return res.status(200).json({ message: 'Profile recovered and registered successfully', user: loginData.user });
+                    } else {
+                        // Profile exists, so just a normal "User exists" error
+                        throw new Error('User already registered.');
+                    }
+                }
+            }
+            throw authError;
+        }
 
         // 2. Create user profile in 'profiles' table
         if (authData.user) {
@@ -33,7 +78,9 @@ exports.register = async (req, res) => {
 
         res.status(201).json({ message: 'User registered successfully', user: authData.user });
     } catch (error) {
-        res.status(400).json({ error: error.message });
+        // Customize error message if possible
+        const msg = error.message === 'User already registered' ? error.message : error.message;
+        res.status(400).json({ error: msg });
     }
 };
 

@@ -16,15 +16,27 @@ const donationRoutes = require('./routes/donationRoutes');
 const requestRoutes = require('./routes/requestRoutes');
 const fridgeRoutes = require('./routes/fridgeRoutes');
 const volunteerRoutes = require('./routes/volunteerRoutes');
+const notificationRoutes = require('./routes/notificationRoutes'); // Explicit Import
 
 app.use('/api/auth', authRoutes);
+app.use('/api/notifications', notificationRoutes); // Mount early
 app.use('/api/donations', donationRoutes);
 app.use('/api/requests', requestRoutes);
 app.use('/api/fridges', fridgeRoutes);
 app.use('/api/volunteers', volunteerRoutes);
-app.use('/api/notifications', require('./routes/notificationRoutes'));
+app.use('/api/volunteers', volunteerRoutes);
+// app.use('/api/notifications', ...); // Moved up
 
-// Base route
+// Debug: Print all registered routes
+app._router.stack.forEach(function (r) {
+    if (r.route && r.route.path) {
+        console.log('Route:', r.route.path)
+    } else if (r.name === 'router') {
+        // middleware router
+        console.log('Router Middleware:', r.regexp)
+    }
+});
+
 app.get('/', (req, res) => {
     res.send('FoodBridge API is running');
 });
