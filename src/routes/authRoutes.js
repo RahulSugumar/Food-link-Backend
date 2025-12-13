@@ -4,6 +4,7 @@ const authController = require('../controllers/authController');
 
 router.post('/register', authController.register);
 router.post('/login', authController.login);
-// router.get('/me', authMiddleware, authController.getMe); // TODO: Add middleware later
+router.get('/profile/:id', authController.getProfile);
+router.put('/profile/:id', authController.updateProfile);
 
 module.exports = router;

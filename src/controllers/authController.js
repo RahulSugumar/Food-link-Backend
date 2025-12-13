@@ -121,20 +121,41 @@ exports.login = async (req, res) => {
 };
 
 // Get current user profile
-exports.getMe = async (req, res) => {
-    const { userId } = req.params; // Assuming middleware extracts this
+exports.getProfile = async (req, res) => {
+    const { id } = req.params;
 
     try {
         const { data, error } = await supabase
             .from('profiles')
             .select('*')
-            .eq('id', userId)
+            .eq('id', id)
             .single();
 
         if (error) throw error;
 
-        res.status(200).json({ user: data });
+        res.status(200).json(data);
     } catch (error) {
         res.status(404).json({ error: error.message });
+    }
+};
+
+// Update user profile
+exports.updateProfile = async (req, res) => {
+    const { id } = req.params;
+    const { name, phone, location } = req.body;
+
+    try {
+        const { data, error } = await supabase
+            .from('profiles')
+            .update({ name, phone, location })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        res.status(200).json({ message: 'Profile updated successfully', user: data });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
     }
 };
