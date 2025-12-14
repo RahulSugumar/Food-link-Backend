@@ -4,6 +4,8 @@ const supabase = require('../config/supabaseClient');
 exports.createDonation = async (req, res) => {
     const { donor_id, food_type, quantity, expiry_time, location, description } = req.body;
 
+    console.log(" Received Donation Request:", req.body); // DEBUG LOG
+
     try {
         // 1. Insert Donation
         const { data, error } = await supabase
@@ -17,13 +19,25 @@ exports.createDonation = async (req, res) => {
                     location, // JSON: { lat, lng, address }
                     description,
                     status: 'available', // available, reserved, completed
+                    receiver_id: null,
+                    volunteer_id: null
                 },
             ])
             .select(); // Ensure we get the inserted data back
 
-        if (error) throw error;
+        if (error) {
+            console.error(" Supabase Insert Error:", error); // DEBUG LOG
+            throw error;
+        }
 
-        const donation = data[0];
+        const donation = data ? data[0] : null;
+
+        if (!donation) {
+            console.error(" Error: Donation inserted but no data returned!");
+            throw new Error("Donation creation failed (no data returned).");
+        }
+
+        console.log(" Donation Created:", donation.id);
 
         // --- NOTIFICATION LOGIC START ---
         // 2. Fetch all receivers
@@ -40,25 +54,28 @@ exports.createDonation = async (req, res) => {
             const notifications = [];
 
             receivers.forEach(receiver => {
-                // Check if receiver has a valid location
-                if (receiver.location && receiver.location.lat && receiver.location.lng && location && location.lat && location.lng) {
-                    const distance = calculateDistance(
-                        location.lat, location.lng,
-                        receiver.location.lat, receiver.location.lng
-                    );
+                try {
+                    // Safe check for location
+                    const rLoc = receiver.location;
+                    if (rLoc && typeof rLoc === 'object' && rLoc.lat && rLoc.lng && location && location.lat && location.lng) {
+                        const distance = calculateDistance(
+                            location.lat, location.lng,
+                            rLoc.lat, rLoc.lng
+                        );
 
-                    console.log(`[Notification Debug] Receiver: ${receiver.name} (${receiver.id}) | Distance: ${distance.toFixed(3)} km | Limit: ${NOTIFICATION_RADIUS_KM} km`);
+                        console.log(`[Notification Debug] Receiver: ${receiver.name} | Dist: ${distance.toFixed(2)}km`);
 
-                    if (distance <= NOTIFICATION_RADIUS_KM) {
-                        notifications.push({
-                            user_id: receiver.id,
-                            message: `New donation available near you: ${quantity} of ${food_type}`,
-                            type: 'match_alert',
-                            related_id: donation.id
-                        });
+                        if (distance <= NOTIFICATION_RADIUS_KM) {
+                            notifications.push({
+                                user_id: receiver.id,
+                                message: `New donation available near you: ${quantity} of ${food_type}`,
+                                type: 'match_alert',
+                                related_id: donation.id
+                            });
+                        }
                     }
-                } else {
-                    console.log(`[Notification Debug] Skipping receiver ${receiver.id}: Missing location data.`);
+                } catch (loopErr) {
+                    console.error(" Error in notification loop processing:", loopErr);
                 }
             });
 
@@ -74,6 +91,7 @@ exports.createDonation = async (req, res) => {
 
         res.status(201).json({ message: 'Donation created successfully', donation: donation });
     } catch (error) {
+        console.error(" FINAL ERROR in createDonation:", error); // CRITICAL LOG
         res.status(400).json({ error: error.message });
     }
 };
@@ -189,6 +207,66 @@ exports.deleteDonation = async (req, res) => {
     }
 };
 
+// Claim a donation (Soft update)
+exports.claimDonation = async (req, res) => {
+    const { id } = req.params;
+    const { receiver_id, delivery_needed } = req.body; // Accept delivery_needed flag
+
+    try {
+        // 1. Verify donation is available
+        const { data: donation, error: fetchError } = await supabase
+            .from('donations')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (fetchError || !donation) {
+            return res.status(404).json({ error: 'Donation not found' });
+        }
+
+        if (donation.status !== 'available') {
+            return res.status(400).json({ error: 'Donation is already claimed or not available' });
+        }
+
+        // 2. Update status and set receiver_id
+        const { data, error } = await supabase
+            .from('donations')
+            .update({
+                status: 'claimed',
+                receiver_id: receiver_id,
+                delivery_needed: delivery_needed || false // Save preference
+            })
+            .eq('id', id)
+            .select('*, profiles:donor_id(name, phone)')
+            .single();
+
+        if (error) throw error;
+
+        res.status(200).json({ message: 'Donation successfully claimed', data });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
+
+// Get claims by specific receiver
+exports.getClaimsByReceiver = async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        const { data, error } = await supabase
+            .from('donations')
+            .select('*, profiles:donor_id(name, phone)')
+            .eq('receiver_id', id)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        res.status(200).json(data);
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
+
 // Helper function to calculate Haversine distance
 function calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 6371; // Radius of the earth in km
@@ -205,3 +283,67 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 function deg2rad(deg) {
     return deg * (Math.PI / 180);
 }
+
+// Volunteer: Accept a task
+exports.acceptTask = async (req, res) => {
+    const { id } = req.params;
+    const { volunteer_id } = req.body;
+
+    try {
+        const { data, error } = await supabase
+            .from('donations')
+            .update({
+                status: 'in_transit',
+                volunteer_id: volunteer_id
+            })
+            .eq('id', id)
+            .eq('status', 'claimed') // Can only accept if currently 'claimed' (waiting)
+            .select()
+            .single();
+
+        if (error) throw error;
+        res.status(200).json({ message: 'Task accepted', data });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
+
+// Volunteer: Mark as Delivered
+exports.completeDelivery = async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        const { data, error } = await supabase
+            .from('donations')
+            .update({ status: 'delivered' })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+        res.status(200).json({ message: 'Delivery completed', data });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
+
+// Volunteer: Get available tasks (claimed + need delivery) AND my active tasks (in_transit)
+exports.getVolunteerTasks = async (req, res) => {
+    const { volunteerId } = req.params;
+
+    try {
+        // Logic: 
+        // 1. Status is 'claimed' AND delivery_needed is TRUE (pool of tasks)
+        // 2. OR Status is 'in_transit' AND volunteer_id is ME (my active tasks)
+        const { data, error } = await supabase
+            .from('donations')
+            .select('*, profiles:donor_id(name, phone, location)')
+            .or(`and(status.eq.claimed,delivery_needed.eq.true),and(status.eq.in_transit,volunteer_id.eq.${volunteerId})`)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        res.status(200).json(data);
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
