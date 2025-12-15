@@ -17,6 +17,7 @@ const requestRoutes = require('./routes/requestRoutes');
 const fridgeRoutes = require('./routes/fridgeRoutes');
 const volunteerRoutes = require('./routes/volunteerRoutes');
 const notificationRoutes = require('./routes/notificationRoutes'); // Explicit Import
+const chatRoutes = require('./routes/chatRoutes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/notifications', notificationRoutes); // Mount early
@@ -25,7 +26,7 @@ app.use('/api/requests', requestRoutes);
 app.use('/api/fridges', fridgeRoutes);
 app.use('/api/volunteers', volunteerRoutes);
 app.use('/api/volunteers', volunteerRoutes);
-// app.use('/api/notifications', ...); // Moved up
+app.use('/api/chat', chatRoutes);
 
 // Debug: Print all registered routes
 app._router.stack.forEach(function (r) {

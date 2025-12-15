@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const notificationController = require('../controllers/notificationController');
 
-console.log('Notification Routes file loaded'); // Debug Log
+// Dg Log
 
 router.get('/ping', (req, res) => {
     res.status(200).json({ message: 'Notification Service is Up' });

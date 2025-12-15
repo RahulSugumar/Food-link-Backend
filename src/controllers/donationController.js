@@ -242,7 +242,41 @@ exports.claimDonation = async (req, res) => {
 
         if (error) throw error;
 
-        res.status(200).json({ message: 'Donation successfully claimed', data });
+        // 3. send Notification
+        const notificationMessage = delivery_needed
+            ? `Action Required: Receiver ${receiver_id} needs delivery for ${data.food_type}.`
+            : `Update: Receiver ${receiver_id} will pick up ${data.food_type}.`;
+
+        // Notify Donor
+        await supabase.from('notifications').insert([{
+            user_id: data.donor_id,
+            message: notificationMessage,
+            is_read: false
+        }]);
+
+        // If delivery needed, valid volunteers nearby should be notified (Mocking "Nearby" simply as all volunteers for now or reuse distance logic if robust)
+        // For simplicity and robustness in this step, let's notify the generic "Volunteer" pool or trust the volunteer dashboard pull model.
+        // But the user explicitly asked for "notification".
+        if (delivery_needed) {
+            const { data: volunteers } = await supabase
+                .from('profiles')
+                .select('id, location')
+                .eq('role', 'volunteer');
+
+            if (volunteers) {
+                // Simple broadcast to all volunteers for this MVP feature to ensure it works
+                const volunteerNotifs = volunteers.map(v => ({
+                    user_id: v.id,
+                    message: `New Delivery Request: ${data.food_type} needs transport!`,
+                    is_read: false
+                }));
+                if (volunteerNotifs.length > 0) {
+                    await supabase.from('notifications').insert(volunteerNotifs);
+                }
+            }
+        }
+
+        res.status(200).json({ message: 'Donation successfully claimed. Notifications sent.', data });
     } catch (error) {
         res.status(400).json({ error: error.message });
     }
@@ -255,7 +289,7 @@ exports.getClaimsByReceiver = async (req, res) => {
     try {
         const { data, error } = await supabase
             .from('donations')
-            .select('*, profiles:donor_id(name, phone)')
+            .select('*, profiles:donor_id(name, phone), volunteer:volunteer_id(name, phone)')
             .eq('receiver_id', id)
             .order('created_at', { ascending: false });
 
@@ -313,15 +347,27 @@ exports.completeDelivery = async (req, res) => {
     const { id } = req.params;
 
     try {
+        // 1. Update Donation Status
         const { data, error } = await supabase
             .from('donations')
             .update({ status: 'delivered' })
             .eq('id', id)
-            .select()
+            .select() // Select to get volunteer_id and donor_id
             .single();
 
         if (error) throw error;
-        res.status(200).json({ message: 'Delivery completed', data });
+
+        // 2. GAMIFICATION: Award Points
+        // Volunteer gets 50 points
+        if (data.volunteer_id) {
+            await supabase.rpc('increment_points', { user_id: data.volunteer_id, points_to_add: 50 });
+        }
+        // Donor gets 20 points
+        if (data.donor_id) {
+            await supabase.rpc('increment_points', { user_id: data.donor_id, points_to_add: 20 });
+        }
+
+        res.status(200).json({ message: 'Delivery completed. Points awarded!', data });
     } catch (error) {
         res.status(400).json({ error: error.message });
     }
@@ -338,12 +384,39 @@ exports.getVolunteerTasks = async (req, res) => {
         const { data, error } = await supabase
             .from('donations')
             .select('*, profiles:donor_id(name, phone, location)')
-            .or(`and(status.eq.claimed,delivery_needed.eq.true),and(status.eq.in_transit,volunteer_id.eq.${volunteerId})`)
+            .or(`and(status.eq.claimed,delivery_needed.eq.true),and(status.eq.in_transit,volunteer_id.eq.${volunteerId}),and(status.eq.delivered,volunteer_id.eq.${volunteerId})`)
             .order('created_at', { ascending: false });
 
         if (error) throw error;
         res.status(200).json(data);
     } catch (error) {
         res.status(400).json({ error: error.message });
+    }
+};
+
+// Leaderboard: Get top users
+exports.getLeaderboard = async (req, res) => {
+    try {
+        // Get Top Volunteers
+        const { data: volunteers, error: vError } = await supabase
+            .from('profiles')
+            .select('name, points, role')
+            .eq('role', 'volunteer')
+            .order('points', { ascending: false })
+            .limit(10);
+
+        // Get Top Donors
+        const { data: donors, error: dError } = await supabase
+            .from('profiles')
+            .select('name, points, role')
+            .eq('role', 'donor')
+            .order('points', { ascending: false })
+            .limit(10);
+
+        if (vError || dError) throw vError || dError;
+
+        res.status(200).json({ volunteers, donors });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 };
