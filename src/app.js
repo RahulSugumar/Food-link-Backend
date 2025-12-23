@@ -28,15 +28,7 @@ app.use('/api/volunteers', volunteerRoutes);
 app.use('/api/volunteers', volunteerRoutes);
 app.use('/api/chat', chatRoutes);
 
-// Debug: Print all registered routes
-app._router.stack.forEach(function (r) {
-    if (r.route && r.route.path) {
-        console.log('Route:', r.route.path)
-    } else if (r.name === 'router') {
-        // middleware router
-        console.log('Router Middleware:', r.regexp)
-    }
-});
+
 
 app.get('/', (req, res) => {
     res.send('FoodBridge API is running');
